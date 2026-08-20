@@ -1,28 +1,6 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
-const addressSchema = new mongoose.Schema(
-  {
-    label: String,
-    line1: String,
-    line2: String,
-    city: String,
-    state: String,
-    pincode: String,
-    phone: String,
-    isDefault: { type: Boolean, default: false },
-  },
-  { _id: true }
-);
-
-const cartItemSchema = new mongoose.Schema(
-  {
-    product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
-    quantity: { type: Number, default: 1, min: 1 },
-  },
-  { _id: false }
-);
-
 const userSchema = new mongoose.Schema(
   {
     firstName: { type: String, required: true, trim: true },
@@ -31,13 +9,37 @@ const userSchema = new mongoose.Schema(
     phone: { type: String, trim: true },
     password: { type: String, required: true, select: false },
     role: { type: String, enum: ["customer", "admin"], default: "customer" },
+    // Phase 14 — the granular RBAC role, only meaningful when role ===
+    // "admin". Absent entirely for customers. See utils/rbac.js for why
+    // this sits alongside, not instead of, the coarse role field above.
+    adminRole: { type: mongoose.Schema.Types.ObjectId, ref: "Role" },
+    // "deactivated" is reversible and customer-initiated (self-service);
+    // "blocked" (Phase 14) is the admin-initiated equivalent for customer
+    // accounts — kept as a distinct value so an audit log entry / support
+    // conversation is never ambiguous about who took the account offline.
+    status: { type: String, enum: ["active", "deactivated", "blocked"], default: "active" },
+    blockedAt: Date,
+    blockedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    blockReason: String,
 
     isVerified: { type: Boolean, default: false },
     otp: { type: String, select: false },
     otpExpires: { type: Date, select: false },
+    // Phase 24 — carries a referral code from signup through to OTP
+    // verification (two separate requests); cleared once attributed so it
+    // never lingers or gets re-used.
+    pendingReferralCode: { type: String, select: false },
 
-    addresses: [addressSchema],
-    cart: [cartItemSchema],
+    // Bumped on logout / password reset so previously-issued refresh tokens
+    // (which embed the version they were signed with) stop being accepted —
+    // gives real refresh-token revocation despite JWTs being stateless.
+    tokenVersion: { type: Number, default: 0, select: false },
+
+    // Addresses moved to their own collection (models/Address.js) so an
+    // Order can later snapshot a purchase-time copy of the fields without
+    // depending on a mutable/deletable subdocument here. Cart moved to its
+    // own Cart/CartItem collections (Phase 6) — see models/Cart.js — so
+    // guest (non-account) carts can exist without a User document at all.
     wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: "Product" }],
   },
   { timestamps: true }
@@ -58,6 +60,7 @@ userSchema.methods.toSafeObject = function () {
   delete obj.password;
   delete obj.otp;
   delete obj.otpExpires;
+  delete obj.tokenVersion;
   return obj;
 };
 

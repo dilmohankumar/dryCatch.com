@@ -1,48 +1,43 @@
-import User from "../models/User.js";
+import * as cartService from "../services/cartService.js";
 
-async function populatedCart(userId) {
-  const user = await User.findById(userId).populate("cart.product");
-  return user.cart;
-}
-
-// GET /cart
+// GET /cart — always revalidates availability/pricing live, never trusts a
+// stored total (see cartService.getCartSummary).
 export async function getCart(req, res) {
-  res.json({ cart: await populatedCart(req.user._id) });
+  const cart = await cartService.getCartSummary(req.cartIdentity);
+  res.json({ success: true, data: cart });
 }
 
-// POST /cart/add — { productId, quantity }
-export async function addToCart(req, res) {
-  const { productId, quantity = 1 } = req.body;
-  const existing = req.user.cart.find((item) => String(item.product) === productId);
-  if (existing) {
-    existing.quantity += quantity;
-  } else {
-    req.user.cart.push({ product: productId, quantity });
-  }
-  await req.user.save();
-  res.status(201).json({ cart: await populatedCart(req.user._id) });
+// POST /cart/items — { variantId, quantity } — ADDS to existing quantity.
+export async function postAddItem(req, res) {
+  const { variantId, quantity } = req.body;
+  if (!variantId) return res.status(400).json({ message: "variantId is required" });
+  // `quantity ?? 1`, not `|| 1` — an explicit 0 (or a negative number) must
+  // reach validateQuantity() and be rejected, not silently become 1.
+  const requestedQuantity = quantity === undefined ? 1 : Number(quantity);
+  await cartService.addItem(req.cartIdentity, { variantId, quantity: requestedQuantity });
+  const cart = await cartService.getCartSummary(req.cartIdentity);
+  res.status(201).json({ success: true, data: cart });
 }
 
-// PUT /cart/:productId — { quantity }
-export async function updateCartItem(req, res) {
+// PATCH /cart/items/:itemId — { quantity } — SETS the absolute quantity.
+export async function patchItem(req, res) {
   const { quantity } = req.body;
-  const item = req.user.cart.find((i) => String(i.product) === req.params.productId);
-  if (!item) return res.status(404).json({ message: "Item not in cart" });
-  item.quantity = quantity;
-  await req.user.save();
-  res.json({ cart: await populatedCart(req.user._id) });
+  await cartService.updateItem(req.cartIdentity, req.params.itemId, Number(quantity));
+  const cart = await cartService.getCartSummary(req.cartIdentity);
+  res.json({ success: true, data: cart });
 }
 
-// DELETE /cart/:productId
-export async function removeFromCart(req, res) {
-  req.user.cart = req.user.cart.filter((i) => String(i.product) !== req.params.productId);
-  await req.user.save();
-  res.json({ cart: await populatedCart(req.user._id) });
+// DELETE /cart/items/:itemId
+export async function deleteItem(req, res) {
+  const item = await cartService.removeItem(req.cartIdentity, req.params.itemId);
+  if (!item) return res.status(404).json({ message: "Item not in cart" });
+  const cart = await cartService.getCartSummary(req.cartIdentity);
+  res.json({ success: true, data: cart });
 }
 
 // DELETE /cart
-export async function clearCart(req, res) {
-  req.user.cart = [];
-  await req.user.save();
-  res.json({ cart: [] });
+export async function deleteCart(req, res) {
+  await cartService.clearCart(req.cartIdentity);
+  const cart = await cartService.getCartSummary(req.cartIdentity);
+  res.json({ success: true, data: cart });
 }

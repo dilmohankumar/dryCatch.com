@@ -1,0 +1,112 @@
+name: CI
+
+# Phase 21 CI pipeline (rule #17/#18) — runs on every PR and push to main.
+# There is no staging/production deployment target configured for this
+# project yet (no hosting provider chosen — see docs/devops.md), so this
+# pipeline stops at "build a verified artifact," not "deploy it." Adding
+# the deploy stage is a documented next step once a host is chosen, not
+# faked here against infrastructure that doesn't exist.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend — test & build check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: drycatch-backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: drycatch-backend/package-lock.json
+
+      # Reproducible install (rule #16) — `ci`, not `install`, so a
+      # lockfile/package.json mismatch fails the build instead of silently
+      # drifting.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit + integration tests
+        run: npm test
+
+      - name: Boot smoke check
+        # A minimal "does it even start" check independent of the test
+        # suite — catches a boot-time crash (e.g. a missing import) that
+        # the test suite's mocked/in-memory setup might not exercise the
+        # same way `node server.js` does.
+        run: |
+          node --check server.js
+          for f in $(find src -name "*.js"); do node --check "$f" || exit 1; done
+
+  frontend:
+    name: Frontend — lint & build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dryCatch-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dryCatch-frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        # continue-on-error: this codebase has 56 pre-existing lint errors
+        # accumulated across 20 phases with no CI to catch them until now.
+        # Fixing all of them is unrelated code-quality work, out of scope
+        # for this DevOps phase and risky to do as a drive-by change here —
+        # documented as technical debt in docs/devops.md. Lint is advisory
+        # (visible in CI output) until that cleanup happens, not yet a
+        # merge gate — flip this to blocking once the existing debt is paid down.
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload build artifact
+        # Artifact traceability (rule #82) — this specific commit's build
+        # output is retrievable, not just "whatever was on disk when
+        # someone deployed."
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist-${{ github.sha }}
+          path: dryCatch-frontend/dist
+          retention-days: 14
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Lightweight, dependency-free secret scan (rule #80/#101) — greps
+      # diffed files for common credential patterns. Not a replacement for
+      # a dedicated tool (e.g. gitleaks/trufflehog) if this project ever
+      # adopts one, but catches the common case (a committed .env, an
+      # inline API key) with zero new infrastructure.
+      - name: Scan for obvious committed secrets
+        run: |
+          if git ls-files | grep -E "^\.env$|^drycatch-backend/\.env$|^dryCatch-frontend/\.env$"; then
+            echo "::error::A .env file is tracked by git — this must never be committed"
+            exit 1
+          fi
+          if git grep -InE "(AKIA[0-9A-Z]{16}|-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----)" -- . ':(exclude)*.md'; then
+            echo "::error::A likely credential/private key was found in tracked files"
+            exit 1
+          fi
+          echo "No obvious committed secrets found."

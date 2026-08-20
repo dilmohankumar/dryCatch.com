@@ -8,7 +8,9 @@ import {
   resetPassword,
   getMe,
   updateProfile,
-  addAddress,
+  changePassword,
+  deactivateAccount,
+  revokeOtherSessions,
   logout,
   refreshToken,
 } from "../controllers/authController.js";
@@ -24,7 +26,12 @@ router.post("/refresh-token", refreshToken);
 
 router.get("/me", protect, getMe);
 router.put("/profile", protect, updateProfile);
-router.post("/address", protect, addAddress);
+router.put("/change-password", protect, changePassword);
+router.post("/deactivate", protect, deactivateAccount);
+router.post("/sessions/revoke-others", protect, revokeOtherSessions);
 router.post("/logout", protect, logout);
+
+// Addresses moved to their own resource — see routes/addressRoutes.js,
+// mounted at /api/v1/addresses.
 
 export default router;

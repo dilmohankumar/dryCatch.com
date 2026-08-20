@@ -1,60 +1,72 @@
 import Review from "../models/Review.js";
-import Product from "../models/Product.js";
+import ReviewMedia from "../models/ReviewMedia.js";
+import * as reviewService from "../services/reviews/reviewService.js";
+import * as reviewVoteService from "../services/reviews/reviewVoteService.js";
+import * as reviewReportService from "../services/reviews/reviewReportService.js";
 
-async function recomputeProductRating(productId) {
-  const reviews = await Review.find({ product: productId });
-  const reviewsCount = reviews.length;
-  const rating = reviewsCount ? reviews.reduce((s, r) => s + r.rating, 0) / reviewsCount : 0;
-  await Product.findByIdAndUpdate(productId, { rating, reviewsCount });
+// POST /products/:productId/reviews
+export async function postCreateReview(req, res) {
+  const { rating, title, body, variantId, media } = req.body;
+  const result = await reviewService.createReview(req.user._id, req.params.productId, { rating, title, body, variantId, media });
+  res.status(201).json(result);
 }
 
-// GET /reviews/product/:productId
-export async function getReviewsByProduct(req, res) {
-  const reviews = await Review.find({ product: req.params.productId })
-    .populate("user", "firstName lastName")
-    .sort({ createdAt: -1 });
-  res.json({ reviews });
+// GET /products/:productId/reviews — public, ?sort=&rating=&verifiedOnly=&hasPhotos=&page=&limit=
+export async function getProductReviews(req, res) {
+  const result = await reviewService.getProductReviews(req.params.productId, req.query);
+  res.json(result);
 }
 
-// POST /reviews — { product, rating, comment }
-export async function createReview(req, res) {
-  const { product, rating, comment } = req.body;
-  const review = await Review.create({ product, rating, comment, user: req.user._id });
-  await recomputeProductRating(product);
-  res.status(201).json({ review });
+// GET /products/:productId/reviews/summary — public
+export async function getReviewSummary(req, res) {
+  const summary = await reviewService.getReviewSummary(req.params.productId);
+  res.json(summary);
 }
 
-// PUT /reviews/:id — { rating, comment }
-export async function updateReview(req, res) {
-  const review = await Review.findOne({ _id: req.params.id, user: req.user._id });
+// GET /reviews/my — customer's own review history (rule #83), including
+// non-published ones (a customer should see their own pending/rejected
+// review, just not other customers').
+export async function getMyReviews(req, res) {
+  const result = await reviewService.getMyReviews(req.user._id, req.query);
+  res.json(result);
+}
+
+// GET /reviews/:id — public if published; owner/admin otherwise.
+export async function getReview(req, res) {
+  const review = await Review.findById(req.params.id).populate("user", "firstName lastName");
   if (!review) return res.status(404).json({ message: "Review not found" });
-
-  if (req.body.rating !== undefined) review.rating = req.body.rating;
-  if (req.body.comment !== undefined) review.comment = req.body.comment;
-  await review.save();
-  await recomputeProductRating(review.product);
-
-  res.json({ review });
-}
-
-// DELETE /reviews/:id
-export async function deleteReview(req, res) {
-  const review = await Review.findOneAndDelete({ _id: req.params.id, user: req.user._id });
-  if (!review) return res.status(404).json({ message: "Review not found" });
-  await recomputeProductRating(review.product);
-  res.json({ message: "Review deleted" });
-}
-
-// PUT /reviews/:id/helpful
-export async function markHelpful(req, res) {
-  const review = await Review.findById(req.params.id);
-  if (!review) return res.status(404).json({ message: "Review not found" });
-
-  const alreadyMarked = review.helpfulBy.some((id) => String(id) === String(req.user._id));
-  if (!alreadyMarked) {
-    review.helpfulBy.push(req.user._id);
-    review.helpfulCount += 1;
-    await review.save();
+  const isOwner = String(review.user._id) === String(req.user?._id);
+  if (review.status !== "published" && !isOwner && req.user?.role !== "admin") {
+    return res.status(404).json({ message: "Review not found" });
   }
+  const media = await ReviewMedia.find({ review: review._id, status: "ready" });
+  res.json({ review, media });
+}
+
+export async function patchReview(req, res) {
+  const { rating, title, body } = req.body;
+  const review = await reviewService.updateReview(req.params.id, req.user._id, { rating, title, body });
   res.json({ review });
+}
+
+export async function deleteReview(req, res) {
+  const review = await reviewService.softDeleteReview(req.params.id, req.user._id);
+  res.json({ review });
+}
+
+// POST /reviews/:id/vote — { vote: "helpful" | "not_helpful" }
+export async function postVote(req, res) {
+  const review = await reviewVoteService.castVote(req.params.id, req.user._id, req.body.vote);
+  res.json({ review });
+}
+
+export async function deleteVote(req, res) {
+  const review = await reviewVoteService.removeVote(req.params.id, req.user._id);
+  res.json({ review });
+}
+
+// POST /reviews/:id/report — { reason, description? }
+export async function postReport(req, res) {
+  const report = await reviewReportService.createReport(req.params.id, req.user._id, req.body);
+  res.status(201).json({ report });
 }

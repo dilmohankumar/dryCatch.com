@@ -1,0 +1,65 @@
+# Local development only (Phase 21, rule #14/#15) — NOT the production
+# deployment topology (that's the Dockerfiles + whatever hosting provider
+# is eventually chosen, documented in drycatch-backend/docs/devops.md).
+# This project has no Redis/queue/worker anywhere (confirmed across
+# Phases 16-20) — so this compose file is just what's actually needed:
+# the app and its database. Source is bind-mounted so `npm run dev`'s
+# --watch picks up changes without rebuilding the image.
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./drycatch-backend
+    command: npm run dev
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      MONGO_URI: mongodb://mongo:27017/drycatch
+      CLIENT_URL: http://localhost:5173
+      JWT_SECRET: ${JWT_SECRET:?set a real JWT_SECRET in a local .env file, do not use the .env.example placeholder}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set a real JWT_REFRESH_SECRET}
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 30d
+      PAYMENT_PROVIDER: razorpay
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+    volumes:
+      - ./drycatch-backend/src:/app/src
+      - ./drycatch-backend/server.js:/app/server.js
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./dryCatch-frontend
+      target: build # the nginx `runtime` stage has no Node/npm — dev needs the intermediate build stage
+    command: npm run dev -- --host
+    restart: unless-stopped
+    ports:
+      - "5173:3000"
+    environment:
+      VITE_API_URL: http://localhost:5000/api/v1
+    volumes:
+      - ./dryCatch-frontend/src:/app/src
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
