@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Phase 18 — baseline CSP. This is a static SPA build with no Node
+      server of its own in this repo (Vite build output is served by
+      whatever static host/CDN is deployed), so a <meta> tag is the only
+      place this repo can set a policy at all — frame-ancestors/X-Frame-Options
+      CANNOT be set via <meta> (browsers ignore it there), so clickjacking
+      protection for this app must be configured at the hosting/CDN/reverse-
+      proxy layer, not here. style-src allows 'unsafe-inline' narrowly
+      (React's `style={{...}}` prop sets the inline style attribute) — a much
+      smaller risk surface than allowing inline/eval'd scripts, which stay
+      blocked. connect-src includes 'self' and localhost for local dev
+      against the Express API on a different port; tighten to the exact
+      production API origin when that's known at deploy time.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://checkout.razorpay.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:* https://api.razorpay.com https://lumberjack.razorpay.com; frame-src https://checkout.razorpay.com https://api.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self';"
+    />
+    <title>client</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
