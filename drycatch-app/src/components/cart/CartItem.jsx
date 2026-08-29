@@ -14,7 +14,7 @@ const AVAILABILITY_LABEL = {
   VARIANT_UNAVAILABLE: "This size is no longer available",
 };
 
-export default function CartItem({ item }) {
+export default function CartItem({ item }) { 
   const dispatch = useDispatch();
   const warning = AVAILABILITY_LABEL[item.availability];
 
