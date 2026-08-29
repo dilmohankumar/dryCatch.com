@@ -1,7 +1,10 @@
 import User from "../models/User.js";
 
 async function populatedWishlist(userId) {
-  const user = await User.findById(userId).populate("wishlist");
+  const user = await User.findById(userId).populate({
+    path: "wishlist",
+    populate: { path: "category", select: "name slug" },
+  });
   return user.wishlist;
 }
 

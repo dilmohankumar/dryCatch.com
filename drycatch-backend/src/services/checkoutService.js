@@ -432,6 +432,13 @@ export async function placeOrder(checkoutId, userId, idempotencyKey, paymentMeth
   claimed.status = paymentMethod === "cod" ? "completed" : "payment_pending";
   await claimed.save();
 
+  // The order snapshot above already captured exactly which items/quantities
+  // were purchased — the live cart has served its purpose and must not keep
+  // showing them as still "in cart" (retry-payment/webhook confirmation
+  // operate on the Order/Checkout, never on the cart, so clearing here is
+  // safe regardless of payment method or outcome).
+  await cartService.clearCart({ userId }).catch(() => {});
+
   logAuditEvent("CHECKOUT_ORDER_CREATED", userId, { checkoutId: String(claimed._id), orderId: String(result.order._id) });
   return { checkout: claimed, order: result.order, razorpayOrderId: result.razorpayOrderId, amount: result.amount };
 }

@@ -89,10 +89,16 @@ export async function verifySignupOTP(req, res) {
     await referralService.attributeSignup(user._id, pendingReferralCode, signupIp).catch(() => {});
   }
 
-  setAuthCookies(res, { accessToken: signAccessToken(user), refreshToken: signRefreshToken(user) });
+  const accessToken = signAccessToken(user);
+  const refreshTokenValue = signRefreshToken(user);
+  setAuthCookies(res, { accessToken, refreshToken: refreshTokenValue });
   await mergeGuestCartIntoUser(req.cookies?.[GUEST_COOKIE], user._id).catch(() => {});
   clearGuestCartCookie(res);
-  res.json({ user: user.toSafeObject() });
+  // Also returned in the JSON body (in addition to the httpOnly cookies) so
+  // non-browser clients that can't hold a cookie jar — the mobile app — can
+  // store these in expo-secure-store and send them as a Bearer header
+  // instead. `protect`/`optionalAuth` already accept either mechanism.
+  res.json({ user: user.toSafeObject(), accessToken, refreshToken: refreshTokenValue });
 }
 
 // POST /auth/login — { email or phone, password }
@@ -128,10 +134,12 @@ export async function login(req, res) {
     return res.status(403).json({ message: "This account has been blocked. Contact support for assistance." });
   }
 
-  setAuthCookies(res, { accessToken: signAccessToken(user), refreshToken: signRefreshToken(user) });
+  const accessToken = signAccessToken(user);
+  const refreshTokenValue = signRefreshToken(user);
+  setAuthCookies(res, { accessToken, refreshToken: refreshTokenValue });
   await mergeGuestCartIntoUser(req.cookies?.[GUEST_COOKIE], user._id).catch(() => {});
   clearGuestCartCookie(res);
-  res.json({ user: user.toSafeObject() });
+  res.json({ user: user.toSafeObject(), accessToken, refreshToken: refreshTokenValue });
 }
 
 // POST /auth/password-reset/request — { email }
@@ -264,7 +272,10 @@ export async function logout(req, res) {
 
 // POST /auth/refresh-token — reads the refresh token from the httpOnly cookie
 export async function refreshToken(req, res) {
-  const token = req.cookies?.refresh_token;
+  // Cookie first (browser clients); body fallback for the mobile app, which
+  // has no cookie jar and instead sends back the refreshToken it stored in
+  // expo-secure-store after login.
+  const token = req.cookies?.refresh_token || req.body?.refreshToken;
   if (!token) return res.status(401).json({ message: "No refresh token" });
 
   try {
@@ -276,8 +287,10 @@ export async function refreshToken(req, res) {
       return res.status(401).json({ message: "Refresh token has been revoked" });
     }
 
-    setAuthCookies(res, { accessToken: signAccessToken(user), refreshToken: signRefreshToken(user) });
-    res.json({ user: user.toSafeObject() });
+    const accessToken = signAccessToken(user);
+    const refreshTokenValue = signRefreshToken(user);
+    setAuthCookies(res, { accessToken, refreshToken: refreshTokenValue });
+    res.json({ user: user.toSafeObject(), accessToken, refreshToken: refreshTokenValue });
   } catch {
     clearAuthCookies(res);
     res.status(401).json({ message: "Invalid or expired refresh token" });
